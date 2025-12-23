@@ -1,0 +1,14 @@
+# Credenciales y Tokens
+credentials.json
+token.json
+
+# Variables de entorno
+.env
+
+# Entorno virtual
+venv/
+*.pyc
+__pycache__/
+
+# Archivos de IDE
+.idea/
