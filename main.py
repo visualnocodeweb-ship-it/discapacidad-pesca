@@ -107,7 +107,7 @@ def send_email_with_attachment(gmail_service, sender_email, recipient_email, sub
         msg = MIMEText(body, 'html') # Usar HTML para el cuerpo
         message.attach(msg)
 
-        part = MIMEBase('application', 'octet-stream')
+        part = MIMEBase('application', 'pdf')
         part.set_payload(attachment_content)
         encoders.encode_base64(part)
         part.add_header('Content-Disposition', 'attachment', filename=attachment_filename)
@@ -296,11 +296,15 @@ def download_pdf_by_name(nombre, apellido):
         print(f"DEBUG: Found PDF for download: ID={pdf_file['id']}, Name={pdf_file['name']}")
         pdf_content = download_pdf(drive_service, pdf_file['id'])
         
+        download_name = pdf_file.get('name')
+        if not download_name.lower().endswith('.pdf'):
+            download_name += '.pdf'
+        
         return send_file(
             io.BytesIO(pdf_content),
             mimetype='application/pdf',
             as_attachment=True,
-            download_name=pdf_file.get('name')
+            download_name=download_name
         )
 
     except HttpError as error:
