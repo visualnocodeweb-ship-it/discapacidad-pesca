@@ -260,7 +260,7 @@ def send_sheet_email():
                 print(f"Error al actualizar la hoja: {sheet_error}")
                 return jsonify({"status": "success", "message": f"Correo enviado, pero falló al actualizar el estado en la hoja: {sheet_error}"})
             
-            return jsonify({"status": "success", "message": f"Correo enviado a {email} y estado actualizado."}))
+            return jsonify({"status": "success", "message": f"Correo enviado a {email} y estado actualizado."})
         else:
             return jsonify({"status": "error", "message": "Fallo al enviar el correo a través de la API de Gmail."}),
 
