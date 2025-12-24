@@ -65,7 +65,11 @@ def get_google_services():
         return {'sheets': sheets_service, 'drive': drive_service, 'gmail': gmail_service}
 
     except Exception as e:
+        import traceback
+        print("--- DETAILED AUTHENTICATION ERROR ---")
         print(f"Ocurrió un error al crear los servicios de Google: {e}")
+        print(traceback.format_exc())
+        print("------------------------------------")
         return None
 
 def download_pdf(drive_service, file_id):
