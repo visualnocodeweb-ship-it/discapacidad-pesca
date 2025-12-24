@@ -236,10 +236,8 @@ def send_sheet_email():
         ).execute()
         files = results.get('files', [])
 
-        if len(files) == 0:
-            return jsonify({"status": "error", "message": f"No se encontró ningún PDF para '{nombre} {apellido}'."}), 404
-        
         pdf_file = files[0]
+        print(f"DEBUG: Found PDF for email: ID={pdf_file['id']}, Name={pdf_file['name']}")
         pdf_content = download_pdf(drive_service, pdf_file['id'])
         
         sender_email = os.getenv("SENDER_EMAIL")
@@ -252,7 +250,7 @@ def send_sheet_email():
         if send_email_with_attachment(services['gmail'], sender_email, email, subject, body, pdf_content, pdf_file.get('name')):
             try:
                 sheets_service = services['sheets']
-                update_range = f'permisos!N{row_index}'
+                update_range = f'discapacidad!N{row_index}'
                 update_body = { 'values': [['Enviado']] }
                 sheets_service.spreadsheets().values().update(
                     spreadsheetId=SPREADSHEET_ID, 
@@ -293,6 +291,7 @@ def download_pdf_by_name(nombre, apellido):
             return f"Se encontraron múltiples PDFs para '{nombre} {apellido}'. No se puede decidir cuál descargar.", 409
 
         pdf_file = files[0]
+        print(f"DEBUG: Found PDF for download: ID={pdf_file['id']}, Name={pdf_file['name']}")
         pdf_content = download_pdf(drive_service, pdf_file['id'])
         
         return send_file(
