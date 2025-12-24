@@ -81,7 +81,9 @@ def download_pdf(drive_service, file_id):
     while not done:
         status, done = downloader.next_chunk()
     fh.seek(0)
-    return fh.read()
+    pdf_data = fh.read()
+    print(f"DEBUG: First 10 bytes of PDF content: {pdf_data[:10]}")
+    return pdf_data
 
 def transform_drive_link(link):
     """Transforma un enlace de Google Drive para compartir en un enlace de visualización directa."""
