@@ -30,7 +30,7 @@ SCOPES = [
 ]
 
 SPREADSHEET_ID = os.environ.get('SPREADSHEET_ID')
-RANGE_NAME = 'permisos!A2:N'
+RANGE_NAME = 'discapacidad!A2:N'
 DRIVE_FOLDER_ID = os.environ.get('DRIVE_FOLDER_ID')
 
 
