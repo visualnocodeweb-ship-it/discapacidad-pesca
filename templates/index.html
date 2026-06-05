@@ -222,7 +222,64 @@
             }
         }
 
+        /* Estilos para el análisis */
+        #analysis-container {
+            display: none;
+            margin-top: 2em;
+            border-top: 1px solid var(--border-color);
+            padding-top: 1.5em;
+        }
+        #analysis-container.visible {
+            display: block;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 2em;
+        }
+        .metric-card {
+            background-color: var(--light-gray);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1.5em;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+            transition: transform 0.2s ease;
+        }
+        .metric-card:hover {
+            transform: translateY(-2px);
+        }
+        .metric-label {
+            display: block;
+            font-size: 13px;
+            color: var(--secondary-color);
+            font-weight: 500;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .metric-value {
+            font-size: 28px;
+            font-weight: 600;
+            color: #212529;
+        }
+        .text-success {
+            color: #198754 !important;
+        }
+        .text-warning {
+            color: #f59e0b !important;
+        }
+        .chart-wrapper {
+            background-color: #fff;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1.5em;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.01);
+        }
+
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
@@ -239,6 +296,7 @@
 
         <button id="refresh-btn" class="action-btn">Refrescar Datos</button>
         <button id="toggle-log-btn" class="action-btn">Logs</button>
+        <button id="toggle-analysis-btn" class="action-btn">Análisis</button>
         
         <table style="margin-top: 1em;">
             <thead>
@@ -262,6 +320,27 @@
         <div id="error-log-container">
             <h2>Registro de Errores (Sesión Actual)</h2>
             <div id="error-log"></div>
+        </div>
+
+        <div id="analysis-container">
+            <h2>Análisis de Emisiones (Discapacidad)</h2>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <span class="metric-label">Total Solicitudes</span>
+                    <span class="metric-value" id="stat-total">-</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-label">Permisos Enviados</span>
+                    <span class="metric-value text-success" id="stat-enviados">-</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-label">Permisos Pendientes</span>
+                    <span class="metric-value text-warning" id="stat-pendientes">-</span>
+                </div>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="emisionesChart" style="max-height: 280px; width: 100%;"></canvas>
+            </div>
         </div>
     </div>
 
@@ -322,11 +401,16 @@
         
 
                     document.getElementById('toggle-log-btn').addEventListener('click', () => {
-
                         document.getElementById('error-log-container').classList.toggle('visible');
-
                     });
 
+                    document.getElementById('toggle-analysis-btn').addEventListener('click', () => {
+                        const panel = document.getElementById('analysis-container');
+                        panel.classList.toggle('visible');
+                        if (panel.classList.contains('visible')) {
+                            loadAnalysisData();
+                        }
+                    });
                 });
 
         
@@ -659,6 +743,109 @@
 
                     }
 
+                }
+
+                async function loadAnalysisData() {
+                    const totalVal = document.getElementById('stat-total');
+                    const enviadosVal = document.getElementById('stat-enviados');
+                    const pendientesVal = document.getElementById('stat-pendientes');
+                    
+                    totalVal.textContent = 'Cargando...';
+                    enviadosVal.textContent = 'Cargando...';
+                    pendientesVal.textContent = 'Cargando...';
+                    
+                    try {
+                        const response = await fetch('/api/get-analysis-data');
+                        if (!response.ok) throw new Error('Error al obtener datos de análisis');
+                        
+                        const data = await response.json();
+                        
+                        totalVal.textContent = data.total_permisos;
+                        enviadosVal.textContent = data.total_enviados;
+                        pendientesVal.textContent = data.total_pendientes;
+                        
+                        renderEmissionsChart(data.por_mes);
+                    } catch (error) {
+                        console.error('Error al cargar datos de análisis:', error);
+                        totalVal.textContent = 'Error';
+                        enviadosVal.textContent = 'Error';
+                        pendientesVal.textContent = 'Error';
+                        logErrorToUI(`Error en análisis: ${error.message}`);
+                    }
+                }
+
+                let emissionsChart = null;
+                function renderEmissionsChart(data) {
+                    const ctx = document.getElementById('emisionesChart').getContext('2d');
+                    
+                    const labels = data.map(item => item.mes);
+                    const values = data.map(item => item.cantidad);
+                    
+                    if (emissionsChart) {
+                        emissionsChart.data.labels = labels;
+                        emissionsChart.data.datasets[0].data = values;
+                        emissionsChart.update();
+                    } else {
+                        emissionsChart = new Chart(ctx, {
+                            type: 'bar',
+                            data: {
+                                labels: labels,
+                                datasets: [{
+                                    label: 'Permisos Emitidos',
+                                    data: values,
+                                    backgroundColor: 'rgba(13, 110, 253, 0.7)',
+                                    borderColor: 'rgba(13, 110, 253, 1)',
+                                    borderWidth: 1.5,
+                                    borderRadius: 4,
+                                    barPercentage: 0.6
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: {
+                                        display: false
+                                    },
+                                    tooltip: {
+                                        padding: 10,
+                                        backgroundColor: '#212529',
+                                        titleColor: '#fff',
+                                        bodyColor: '#fff',
+                                        cornerRadius: 6,
+                                        displayColors: false
+                                    }
+                                },
+                                scales: {
+                                    y: {
+                                        beginAtZero: true,
+                                        ticks: {
+                                            precision: 0,
+                                            color: '#6c757d',
+                                            font: {
+                                                family: 'Inter'
+                                            }
+                                        },
+                                        grid: {
+                                            color: '#f1f3f5'
+                                        }
+                                    },
+                                    x: {
+                                        ticks: {
+                                            color: '#6c757d',
+                                            font: {
+                                                family: 'Inter',
+                                                size: 11
+                                            }
+                                        },
+                                        grid: {
+                                            display: false
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
                 }
 
             </script>

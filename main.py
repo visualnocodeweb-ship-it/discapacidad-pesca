@@ -11,6 +11,9 @@ import re
 import math
 import json
 import base64
+import threading
+import requests as http_requests
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -127,6 +130,64 @@ def send_email_with_attachment(gmail_service, sender_email, recipient_email, sub
     except Exception as e:
         print(f"Ocurrió un error inesperado al crear el mensaje de correo: {e}")
         return False
+
+
+# --- NOTIFICACIÓN AL TABLERO ---
+def notify_tablero(sheets_service, last_sent_name=None, last_sent_time=None):
+    """
+    Lee las stats actualizadas de la planilla y las envía al webhook del tablero.
+    Se ejecuta en un hilo separado para no bloquear la respuesta al operador.
+    """
+    tablero_url = os.environ.get('TABLERO_WEBHOOK_URL')
+    if not tablero_url:
+        print("[Tablero] TABLERO_WEBHOOK_URL no configurada. Saltando notificación.")
+        return
+
+    try:
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID, range=RANGE_NAME
+        ).execute()
+        values = result.get('values', [])
+
+        total = len(values)
+        enviados = 0
+        latest_disability = []
+
+        for row in values:
+            status = row[13] if len(row) > 13 else ''
+            if status.lower() == 'enviado':
+                enviados += 1
+
+        pendientes = total - enviados
+
+        # Últimos 5 registros (invertidos = más recientes primero)
+        for row in reversed(values[-5:]):
+            nombre = row[0] if len(row) > 0 else ''
+            apellido = row[1] if len(row) > 1 else ''
+            full_name = f'{nombre} {apellido}'.strip()
+            
+            timestamp = ''
+            if last_sent_name and full_name.lower() == last_sent_name.lower():
+                timestamp = last_sent_time
+
+            latest_disability.append({
+                'name': full_name,
+                'timestamp': timestamp,
+                'type': 'Discapacidad'
+            })
+
+        payload = {
+            'disability_permits_total': total,
+            'disability_permits_enviados': enviados,
+            'disability_permits_pendientes': pendientes,
+            'disability_permits_latest': latest_disability
+        }
+
+        r = http_requests.post(tablero_url, json=payload, timeout=10)
+        print(f"[Tablero] Webhook enviado a {tablero_url}. Status: {r.status_code}")
+
+    except Exception as e:
+        print(f"[Tablero] Error al notificar al tablero: {e}")
 
 
 # --- ENDPOINTS DE LA APP ---
@@ -265,6 +326,13 @@ def send_sheet_email():
                 print(f"Error al actualizar la hoja: {sheet_error}")
                 return jsonify({"status": "success", "message": f"Correo enviado, pero falló al actualizar el estado en la hoja: {sheet_error}"})
             
+            # Notificar al tablero en segundo plano (no bloquea la respuesta)
+            threading.Thread(
+                target=notify_tablero,
+                args=(services['sheets'],),
+                daemon=True
+            ).start()
+            
             return jsonify({"status": "success", "message": f"Correo enviado a {email} y estado actualizado."})
         else:
             return jsonify({"status": "error", "message": "Fallo al enviar el correo a través de la API de Gmail."}),
@@ -315,5 +383,119 @@ def download_pdf_by_name(nombre, apellido):
         return "Error interno del servidor al descargar el archivo.", 500
 
 
+@app.route('/api/get-analysis-data')
+def get_analysis_data():
+    """Calcula las métricas de solicitudes y agrupa los permisos enviados por mes."""
+    services = get_google_services()
+    if not services:
+        return jsonify({"error": "No se pudo autenticar con Google. Revisa las variables de entorno."}), 500
+    
+    try:
+        sheet = services['sheets'].spreadsheets()
+        result = sheet.values().get(spreadsheetId=SPREADSHEET_ID, range=RANGE_NAME).execute()
+        values = result.get('values', [])
+        
+        total_permisos = len(values)
+        total_enviados = 0
+        enviados_list = []
+        
+        for i, row in enumerate(values):
+            status = row[13] if len(row) > 13 else ''
+            fecha_inicio = row[9] if len(row) > 9 else ''
+            
+            if status.lower() == 'enviado':
+                total_enviados += 1
+                enviados_list.append({
+                    'fecha_inicio': fecha_inicio
+                })
+                
+        total_pendientes = total_permisos - total_enviados
+        
+        # Helper para parsear la fecha de inicio
+        def parse_date(date_str):
+            if not date_str:
+                return None
+            date_str = date_str.strip()
+            # Probar formatos comunes
+            for fmt in ('%d/%m/%Y', '%d/%m/%y', '%Y-%m-%d'):
+                try:
+                    return datetime.strptime(date_str, fmt)
+                except ValueError:
+                    pass
+            # Buscar patrón por si hay texto extra
+            match = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})', date_str)
+            if match:
+                d, m, y = match.groups()
+                if len(y) == 2:
+                    y = "20" + y
+                try:
+                    return datetime(int(y), int(m), int(d))
+                except ValueError:
+                    pass
+            return None
+
+        # Agrupar los permisos enviados por mes
+        from collections import defaultdict
+        por_mes_dict = defaultdict(int)
+        
+        for record in enviados_list:
+            dt = parse_date(record['fecha_inicio'])
+            # Fallback a la fecha actual si no se encuentra
+            if not dt:
+                dt = datetime.now()
+                
+            mes_key = dt.strftime("%Y-%m")
+            por_mes_dict[mes_key] += 1
+            
+        # Generar lista de meses desde Octubre de 2025 hasta Hoy de forma dinámica
+        start_date = datetime(2025, 10, 1)
+        end_date = datetime.now()
+        
+        months_keys = []
+        current = start_date
+        while current <= end_date:
+            months_keys.append(current.strftime('%Y-%m'))
+            if current.month == 12:
+                current = datetime(current.year + 1, 1, 1)
+            else:
+                current = datetime(current.year, current.month + 1, 1)
+                
+        # Si hay meses futuros (en los registros), los agregamos
+        for mes_key in por_mes_dict.keys():
+            if mes_key not in months_keys:
+                months_keys.append(mes_key)
+                
+        # Ordenamos los meses cronológicamente
+        months_keys.sort()
+        
+        # Mapeo de nombres de mes para mostrar más amigable
+        meses_nombres = {
+            "01": "Ene", "02": "Feb", "03": "Mar", "04": "Abr",
+            "05": "May", "06": "Jun", "07": "Jul", "08": "Ago",
+            "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dic"
+        }
+        
+        por_mes_list = []
+        for mes_key in months_keys:
+            anio, mes_num = mes_key.split('-')
+            nombre_mes = f"{meses_nombres.get(mes_num, mes_num)} {anio}"
+            por_mes_list.append({
+                "mes": nombre_mes,
+                "cantidad": por_mes_dict[mes_key]
+            })
+            
+        return jsonify({
+            "total_permisos": total_permisos,
+            "total_enviados": total_enviados,
+            "total_pendientes": total_pendientes,
+            "por_mes": por_mes_list
+        })
+        
+    except Exception as e:
+        print(f"Error en get_analysis_data: {e}")
+        return jsonify({"error": f"Error al calcular análisis: {str(e)}"}), 500
+
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5001)
+    port = int(os.environ.get('PORT', 5002))
+    app.run(debug=True, port=port)
